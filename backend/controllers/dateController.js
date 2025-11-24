@@ -2,15 +2,12 @@ const { getDb } = require("../config/database");
 const {
   getAvailableDates: getSystemDates,
   TIME_SLOTS,
+  formatDisplayDate, // ✅ USE THE SAME FUNCTION AS BACKEND
 } = require("../utils/timeSlots");
 const moment = require("moment-timezone");
 
-// Helper function to format display date
-const formatDisplayDate = (dateStr) => {
-  return moment(dateStr)
-    .tz(process.env.TIMEZONE || "America/Winnipeg")
-    .format("dddd, MMMM D, YYYY");
-};
+// ✅ REMOVED the different formatDisplayDate function
+// ✅ Now using the SAME one from timeSlots.js
 
 // Get all available dates and slots
 const getAvailableDates = async (req, res) => {
@@ -22,22 +19,31 @@ const getAvailableDates = async (req, res) => {
     console.log("📅 System dates from timeSlots:", systemDates);
 
     // Get disabled slots from database
-    const [disabledSlots] = await db.execute(
-      "SELECT date, time_slot FROM disabled_slots WHERE enabled = 0"
+    const disabledSlots = await db.query(
+      "SELECT date, time_slot FROM disabled_slots WHERE enabled = false"
     );
 
-    console.log("🚫 Disabled slots from database:", disabledSlots);
+    // ✅ NEW: Get booked slots from appointments table
+    const bookedSlots = await db.query(
+      "SELECT date, time_slot FROM appointments WHERE status IN ('pending', 'confirmed')"
+    );
+
+    console.log("🚫 Disabled slots from database:", disabledSlots.rows);
+    console.log("📅 Booked slots from appointments:", bookedSlots.rows);
 
     // Create availability structure
     const availability = [];
 
     for (const date of systemDates) {
       // Find disabled slots for this date
-      const disabledForDate = disabledSlots.filter((slot) => {
-        const slotDate =
-          slot.date instanceof Date
-            ? moment(slot.date).format("YYYY-MM-DD")
-            : slot.date;
+      const disabledForDate = disabledSlots.rows.filter((slot) => {
+        const slotDate = moment(slot.date).format("YYYY-MM-DD");
+        return slotDate === date;
+      });
+
+      // ✅ NEW: Find booked slots for this date
+      const bookedForDate = bookedSlots.rows.filter((slot) => {
+        const slotDate = moment(slot.date).format("YYYY-MM-DD");
         return slotDate === date;
       });
 
@@ -45,17 +51,27 @@ const getAvailableDates = async (req, res) => {
         `📅 ${date} - Disabled slots:`,
         disabledForDate.map((s) => s.time_slot)
       );
+      console.log(
+        `📅 ${date} - Booked slots:`,
+        bookedForDate.map((s) => s.time_slot)
+      );
 
       // Create slots array with availability status
       const allSlots = TIME_SLOTS.map((slot) => {
         const isDisabled = disabledForDate.some(
           (disabled) => disabled.time_slot === slot
         );
+        const isBooked = bookedForDate.some(
+          (booked) => booked.time_slot === slot
+        );
+
         return {
           value: slot,
           display: slot,
-          available: !isDisabled,
-          disabled: isDisabled,
+          available: !isDisabled && !isBooked,
+          disabled: isDisabled || isBooked,
+          booked: isBooked,
+          adminDisabled: isDisabled,
         };
       });
 
@@ -65,12 +81,13 @@ const getAvailableDates = async (req, res) => {
       const disabledSlotsCount = allSlots.filter(
         (slot) => !slot.available
       ).length;
+      const bookedSlotsCount = allSlots.filter((slot) => slot.booked).length;
 
       availability.push({
         date: date,
-        displayDate: formatDisplayDate(date),
+        displayDate: formatDisplayDate(date), // ✅ NOW USING SAME FUNCTION
         availableSlots: allSlots,
-        bookedCount: 0,
+        bookedCount: bookedSlotsCount,
         disabledCount: disabledSlotsCount,
         totalSlots: TIME_SLOTS.length,
         availableSlotsCount: availableSlotsCount,
@@ -90,12 +107,14 @@ const getAvailableDates = async (req, res) => {
     const systemDates = getSystemDates();
     const availability = systemDates.map((date) => ({
       date: date,
-      displayDate: formatDisplayDate(date),
+      displayDate: formatDisplayDate(date), // ✅ NOW USING SAME FUNCTION
       availableSlots: TIME_SLOTS.map((slot) => ({
         value: slot,
         display: slot,
         available: true,
         disabled: false,
+        booked: false,
+        adminDisabled: false,
       })),
       bookedCount: 0,
       disabledCount: 0,
@@ -116,21 +135,18 @@ const getDeletedSlots = async (req, res) => {
   try {
     const db = getDb();
 
-    const [deletedSlots] = await db.execute(
-      "SELECT * FROM disabled_slots WHERE enabled = 0 ORDER BY date, time_slot"
+    const deletedSlots = await db.query(
+      "SELECT * FROM disabled_slots WHERE enabled = false ORDER BY date, time_slot"
     );
 
     // Format dates properly for frontend
-    const formattedSlots = deletedSlots.map((slot) => {
-      const dateStr =
-        slot.date instanceof Date
-          ? moment(slot.date).format("YYYY-MM-DD")
-          : slot.date;
+    const formattedSlots = deletedSlots.rows.map((slot) => {
+      const dateStr = moment(slot.date).format("YYYY-MM-DD");
 
       return {
         ...slot,
         date: dateStr,
-        displayDate: formatDisplayDate(dateStr),
+        displayDate: formatDisplayDate(dateStr), // ✅ NOW USING SAME FUNCTION
       };
     });
 
@@ -164,15 +180,15 @@ const deleteDateSlot = async (req, res) => {
     }
 
     // Check if slot already exists in disabled_slots
-    const [existing] = await db.execute(
-      "SELECT * FROM disabled_slots WHERE date = ? AND time_slot = ?",
+    const existing = await db.query(
+      "SELECT * FROM disabled_slots WHERE date = $1 AND time_slot = $2",
       [date, time_slot]
     );
 
-    if (existing.length > 0) {
+    if (existing.rows.length > 0) {
       // Update existing record to disabled
-      await db.execute(
-        "UPDATE disabled_slots SET enabled = 0 WHERE date = ? AND time_slot = ?",
+      await db.query(
+        "UPDATE disabled_slots SET enabled = false WHERE date = $1 AND time_slot = $2",
         [date, time_slot]
       );
       console.log(
@@ -180,20 +196,20 @@ const deleteDateSlot = async (req, res) => {
       );
     } else {
       // Insert new disabled slot
-      await db.execute(
-        "INSERT INTO disabled_slots (date, time_slot, enabled) VALUES (?, ?, 0)",
+      await db.query(
+        "INSERT INTO disabled_slots (date, time_slot, enabled) VALUES ($1, $2, false)",
         [date, time_slot]
       );
       console.log(`✅ Inserted new disabled slot: ${date} - ${time_slot}`);
     }
 
     // Verify the change
-    const [verify] = await db.execute(
-      "SELECT * FROM disabled_slots WHERE date = ? AND time_slot = ? AND enabled = 0",
+    const verify = await db.query(
+      "SELECT * FROM disabled_slots WHERE date = $1 AND time_slot = $2 AND enabled = false",
       [date, time_slot]
     );
 
-    if (verify.length > 0) {
+    if (verify.rows.length > 0) {
       console.log(`✅ VERIFIED: Slot ${date} - ${time_slot} is now disabled`);
     }
 
@@ -234,34 +250,34 @@ const restoreDateSlot = async (req, res) => {
     }
 
     // Check if slot exists in disabled_slots
-    const [existing] = await db.execute(
-      "SELECT * FROM disabled_slots WHERE date = ? AND time_slot = ?",
+    const existing = await db.query(
+      "SELECT * FROM disabled_slots WHERE date = $1 AND time_slot = $2",
       [date, time_slot]
     );
 
-    if (existing.length > 0) {
+    if (existing.rows.length > 0) {
       // Update to enabled
-      await db.execute(
-        "UPDATE disabled_slots SET enabled = 1 WHERE date = ? AND time_slot = ?",
+      await db.query(
+        "UPDATE disabled_slots SET enabled = true WHERE date = $1 AND time_slot = $2",
         [date, time_slot]
       );
       console.log(`✅ Updated slot to enabled: ${date} - ${time_slot}`);
     } else {
       // Insert as enabled
-      await db.execute(
-        "INSERT INTO disabled_slots (date, time_slot, enabled) VALUES (?, ?, 1)",
+      await db.query(
+        "INSERT INTO disabled_slots (date, time_slot, enabled) VALUES ($1, $2, true)",
         [date, time_slot]
       );
       console.log(`✅ Inserted new enabled slot: ${date} - ${time_slot}`);
     }
 
     // Verify the change
-    const [verify] = await db.execute(
-      "SELECT * FROM disabled_slots WHERE date = ? AND time_slot = ? AND enabled = 1",
+    const verify = await db.query(
+      "SELECT * FROM disabled_slots WHERE date = $1 AND time_slot = $2 AND enabled = true",
       [date, time_slot]
     );
 
-    if (verify.length > 0) {
+    if (verify.rows.length > 0) {
       console.log(`✅ VERIFIED: Slot ${date} - ${time_slot} is now enabled`);
     }
 

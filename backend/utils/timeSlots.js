@@ -6,7 +6,9 @@ const TIME_SLOTS = ["10 am - 12 pm", "2 pm - 4 pm", "5 pm - 7 pm"];
 const getAvailableDates = () => {
   const timezone = process.env.TIMEZONE || "America/Winnipeg";
   const availableDates = [];
-  const today = moment().tz(timezone).startOf("day");
+
+  // Use UTC to avoid timezone shifting bullshit
+  const today = moment().utc().startOf("day");
 
   console.log(
     "🔄 Generating weekend dates starting from:",
@@ -18,38 +20,56 @@ const getAvailableDates = () => {
     const date = today.clone().add(i, "days");
     const dayOfWeek = date.day(); // 0 = Sunday, 6 = Saturday
 
-    // Only include Saturdays (6) and Sundays (0)
+    console.log(
+      `Checking ${date.format("YYYY-MM-DD")} - ${date.format(
+        "dddd"
+      )} - Day ${dayOfWeek}`
+    );
+
+    // ONLY include Saturdays (6) and Sundays (0) - NO FUCKING FRIDAYS!
     if (dayOfWeek === 6 || dayOfWeek === 0) {
       const dateStr = date.format("YYYY-MM-DD");
       const dayName = date.format("dddd");
       availableDates.push(dateStr);
-      console.log(`✅ Added ${dateStr} (${dayName})`);
+      console.log(`✅ ADDED ${dateStr} (${dayName})`);
+    } else {
+      console.log(
+        `❌ SKIPPED ${date.format("YYYY-MM-DD")} (${date.format(
+          "dddd"
+        )}) - NOT WEEKEND`
+      );
     }
   }
 
   console.log(`📅 Total weekend dates found: ${availableDates.length}`);
-  return availableDates.slice(0, 8); // Return first 8 weekend dates
+
+  // Make sure we return exactly the same dates as Booking Form
+  const finalDates = availableDates.slice(0, 8);
+  console.log("🎯 FINAL DATES FOR SYSTEM:", finalDates);
+  return finalDates;
 };
 
 const getAvailableTimeSlots = async (db, date) => {
   try {
     const allSlots = TIME_SLOTS;
 
-    // Get booked slots for this date (MySQL version)
-    const [bookedSlots] = await db.execute(
-      "SELECT time_slot FROM appointments WHERE date = ? AND status IN ('pending', 'confirmed')",
+    // Get booked slots for this date (PostgreSQL version)
+    const bookedResult = await db.query(
+      "SELECT time_slot FROM appointments WHERE date = $1 AND status IN ('pending', 'confirmed')",
       [date]
     );
 
-    const bookedSlotValues = bookedSlots.map((slot) => slot.time_slot);
+    const bookedSlotValues = bookedResult.rows.map((slot) => slot.time_slot);
 
-    // Get disabled slots from Date Controller (MySQL version)
-    const [disabledSlots] = await db.execute(
-      "SELECT time_slot FROM disabled_slots WHERE date = ? AND enabled = 0",
+    // Get disabled slots from Date Controller (PostgreSQL version)
+    const disabledResult = await db.query(
+      "SELECT time_slot FROM disabled_slots WHERE date = $1 AND enabled = false",
       [date]
     );
 
-    const disabledSlotValues = disabledSlots.map((slot) => slot.time_slot);
+    const disabledSlotValues = disabledResult.rows.map(
+      (slot) => slot.time_slot
+    );
 
     // Filter out booked and disabled slots
     const availableSlots = allSlots.filter(
@@ -66,9 +86,10 @@ const getAvailableTimeSlots = async (db, date) => {
 };
 
 const isWeekend = (date) => {
-  const momentDate = moment(date);
+  // Use UTC to avoid timezone bullshit
+  const momentDate = moment.utc(date);
   const dayOfWeek = momentDate.day();
-  const isWeekendDay = dayOfWeek === 6 || dayOfWeek === 0;
+  const isWeekendDay = dayOfWeek === 6 || dayOfWeek === 0; // Saturday or Sunday ONLY
   console.log(
     `📅 ${date} is ${momentDate.format("dddd")} - Weekend: ${isWeekendDay}`
   );
@@ -76,27 +97,26 @@ const isWeekend = (date) => {
 };
 
 const formatDisplayDate = (dateStr) => {
-  return moment(dateStr)
-    .tz(process.env.TIMEZONE || "America/Winnipeg")
-    .format("dddd, MMMM D, YYYY");
+  // FIX: Use moment.utc() instead of moment().utc() to preserve the correct day
+  return moment.utc(dateStr).format("dddd, MMMM D, YYYY");
 };
 
 // Helper function to check if a specific date+slot is available
 const isSlotAvailable = async (db, date, time_slot) => {
   try {
     // Check if slot is booked
-    const [bookedSlots] = await db.execute(
-      "SELECT id FROM appointments WHERE date = ? AND time_slot = ? AND status IN ('pending', 'confirmed')",
+    const bookedResult = await db.query(
+      "SELECT id FROM appointments WHERE date = $1 AND time_slot = $2 AND status IN ('pending', 'confirmed')",
       [date, time_slot]
     );
 
     // Check if slot is disabled in Date Controller
-    const [disabledSlots] = await db.execute(
-      "SELECT id FROM disabled_slots WHERE date = ? AND time_slot = ? AND enabled = 0",
+    const disabledResult = await db.query(
+      "SELECT id FROM disabled_slots WHERE date = $1 AND time_slot = $2 AND enabled = false",
       [date, time_slot]
     );
 
-    return bookedSlots.length === 0 && disabledSlots.length === 0;
+    return bookedResult.rows.length === 0 && disabledResult.rows.length === 0;
   } catch (error) {
     console.error("Error checking slot availability:", error);
     return false;
@@ -106,11 +126,11 @@ const isSlotAvailable = async (db, date, time_slot) => {
 // Get all disabled slots for a specific date (for Date Controller)
 const getDisabledSlots = async (db, date) => {
   try {
-    const [disabledSlots] = await db.execute(
-      "SELECT time_slot FROM disabled_slots WHERE date = ? AND enabled = 0",
+    const disabledResult = await db.query(
+      "SELECT time_slot FROM disabled_slots WHERE date = $1 AND enabled = false",
       [date]
     );
-    return disabledSlots.map((slot) => slot.time_slot);
+    return disabledResult.rows.map((slot) => slot.time_slot);
   } catch (error) {
     console.error("Error getting disabled slots:", error);
     return [];

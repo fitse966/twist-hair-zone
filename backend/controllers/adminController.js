@@ -102,18 +102,18 @@ const adminLogin = async (req, res) => {
     const db = getDb();
 
     // Get admin from database
-    const [admins] = await db.execute("SELECT * FROM admins WHERE email = ?", [
+    const admins = await db.query("SELECT * FROM admins WHERE email = $1", [
       email,
     ]);
 
-    if (admins.length === 0) {
+    if (admins.rows.length === 0) {
       return res.status(401).json({
         success: false,
         message: "Invalid credentials",
       });
     }
 
-    const admin = admins[0];
+    const admin = admins.rows[0];
     const isPasswordValid = await bcrypt.compare(password, admin.password);
 
     if (!isPasswordValid) {
@@ -170,19 +170,19 @@ const getDashboardStats = async (req, res) => {
     const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD format
 
     // Get stats from database
-    const [statsRows] = await db.execute(
+    const statsRows = await db.query(
       `SELECT 
         COUNT(*) as totalBookings,
         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pendingBookings,
         SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END) as confirmedBookings,
         SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completedBookings,
         SUM(CASE WHEN status = 'canceled' THEN 1 ELSE 0 END) as canceledBookings,
-        SUM(CASE WHEN date = ? THEN 1 ELSE 0 END) as todayBookings
+        SUM(CASE WHEN date = $1 THEN 1 ELSE 0 END) as todayBookings
       FROM appointments`,
       [today]
     );
 
-    const stats = statsRows[0];
+    const stats = statsRows.rows[0];
 
     res.json({
       success: true,
@@ -237,29 +237,35 @@ const getAppointments = async (req, res) => {
 
     let whereClause = "WHERE 1=1";
     const params = [];
+    let paramCount = 0;
 
     if (status && status !== "all") {
-      whereClause += " AND status = ?";
+      paramCount++;
+      whereClause += ` AND status = $${paramCount}`;
       params.push(status);
     }
 
     if (search) {
-      whereClause += " AND (name LIKE ? OR email LIKE ? OR phone LIKE ?)";
+      paramCount++;
+      whereClause += ` AND (name LIKE $${paramCount} OR email LIKE $${
+        paramCount + 1
+      } OR phone LIKE $${paramCount + 2})`;
       const searchTerm = `%${search}%`;
       params.push(searchTerm, searchTerm, searchTerm);
+      paramCount += 2;
     }
 
     // Get appointments
-    const [appointments] = await db.execute(
+    const appointments = await db.query(
       `SELECT * FROM appointments 
        ${whereClause}
        ORDER BY created_at DESC
-       LIMIT ? OFFSET ?`,
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, parseInt(limit), parseInt(offset)]
     );
 
     // Get total count
-    const [totalResult] = await db.execute(
+    const totalResult = await db.query(
       `SELECT COUNT(*) as total FROM appointments ${whereClause}`,
       params
     );
@@ -267,11 +273,11 @@ const getAppointments = async (req, res) => {
     res.json({
       success: true,
       data: {
-        appointments: appointments || [],
+        appointments: appointments.rows || [],
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
-          total: totalResult[0]?.total || 0,
+          total: parseInt(totalResult.rows[0]?.total) || 0,
         },
       },
     });
@@ -311,22 +317,22 @@ const updateAppointmentStatus = async (req, res) => {
     const db = getDb();
 
     // Get current appointment
-    const [appointments] = await db.execute(
-      "SELECT * FROM appointments WHERE id = ?",
+    const appointments = await db.query(
+      "SELECT * FROM appointments WHERE id = $1",
       [id]
     );
 
-    if (appointments.length === 0) {
+    if (appointments.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: "Appointment not found",
       });
     }
 
-    const appointment = appointments[0];
+    const appointment = appointments.rows[0];
 
     // Update status
-    await db.execute("UPDATE appointments SET status = ? WHERE id = ?", [
+    await db.query("UPDATE appointments SET status = $1 WHERE id = $2", [
       status,
       id,
     ]);
@@ -365,7 +371,7 @@ const deleteAppointment = async (req, res) => {
 
     const db = getDb();
 
-    await db.execute("DELETE FROM appointments WHERE id = ?", [id]);
+    await db.query("DELETE FROM appointments WHERE id = $1", [id]);
 
     res.json({
       success: true,

@@ -17,7 +17,7 @@ app.use(express.urlencoded({ extended: true }));
 // Routes
 app.use("/api/bookings", require("./routes/bookings"));
 app.use("/api/admin", require("./routes/admin"));
-app.use("/api/date-controller", require("./routes/dateController"));
+app.use("/api/admin/date-controller", require("./routes/dateController")); // ✅ FIXED THIS LINE
 
 // Initialize database and email before starting server
 const startServer = async () => {

@@ -97,12 +97,12 @@ const createBooking = async (req, res) => {
     }
 
     // ✅ CHECK IF SLOT IS DISABLED IN DATE CONTROLLER
-    const [disabledSlots] = await db.execute(
-      "SELECT time_slot FROM disabled_slots WHERE date = ? AND time_slot = ? AND enabled = 0",
+    const disabledSlots = await db.query(
+      "SELECT time_slot FROM disabled_slots WHERE date = $1 AND time_slot = $2 AND enabled = false",
       [date, time_slot]
     );
 
-    if (disabledSlots.length > 0) {
+    if (disabledSlots.rows.length > 0) {
       console.log(`❌ Booking rejected: ${date} - ${time_slot} is disabled`);
       return res.status(400).json({
         success: false,
@@ -112,12 +112,12 @@ const createBooking = async (req, res) => {
     }
 
     // Check if user already has a booking for this date
-    const [existingBookings] = await db.execute(
-      "SELECT id FROM appointments WHERE email = ? AND date = ?",
+    const existingBookings = await db.query(
+      "SELECT id FROM appointments WHERE email = $1 AND date = $2",
       [email, date]
     );
 
-    if (existingBookings.length > 0) {
+    if (existingBookings.rows.length > 0) {
       return res.status(400).json({
         success: false,
         message:
@@ -135,9 +135,9 @@ const createBooking = async (req, res) => {
     }
 
     // Create booking
-    const [result] = await db.execute(
+    const result = await db.query(
       `INSERT INTO appointments (name, email, phone, message, date, time_slot, status) 
-       VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+       VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING id`,
       [name, email, phone, message || "", date, time_slot]
     );
 
@@ -147,12 +147,13 @@ const createBooking = async (req, res) => {
       success: true,
       message:
         "🎉 Your appointment request has been submitted successfully! We'll contact you soon.",
-      bookingId: result.insertId,
+      bookingId: result.rows[0].id,
     });
   } catch (error) {
     console.error("Booking error:", error);
 
-    if (error.code === "ER_DUP_ENTRY") {
+    if (error.code === "23505") {
+      // PostgreSQL unique violation
       return res.status(400).json({
         success: false,
         message: "This time slot has already been booked by another customer",
