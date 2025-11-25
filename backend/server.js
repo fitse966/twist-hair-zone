@@ -15,6 +15,7 @@ app.use(
     origin: [
       "http://localhost:3000",
       "https://musical-gaufre-7f3289.netlify.app",
+      "https://delightful-madeleine-1a649e.netlify.app", // ✅ ADD THIS
       "https://twist-hair-backend.onrender.com",
     ],
     credentials: true,
