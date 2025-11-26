@@ -18,7 +18,7 @@ const sendConfirmationEmail = async (appointment) => {
     }
 
     // Check if we have email credentials
-    if (!process.env.ADMIN_EMAIL || !process.env.EMAIL_PASS) {
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
       console.log("❌ Email credentials missing");
       return;
     }
@@ -40,7 +40,7 @@ Your Twist Zone Team
     const mailOptions = {
       from: {
         name: "Your Twist Zone",
-        address: process.env.ADMIN_EMAIL,
+        address: process.env.EMAIL_USER,
       },
       to: appointment.email,
       subject: "✅ Your Twist Zone - Appointment Confirmed!",
@@ -66,75 +66,41 @@ const adminLogin = async (req, res) => {
       });
     }
 
-    // Check if we're in local development mode
-    if (!process.env.DATABASE_URL) {
-      console.log("🔧 LOCAL MODE: Simulating admin login");
+    // ✅ ALWAYS USE ENVIRONMENT VARIABLES
+    const adminEmail = process.env.ADMIN_EMAIL;
+    const adminPassword = process.env.ADMIN_PASSWORD;
 
-      if (
-        email === "Kalkidanhulet@gmail.com" &&
-        password === "Kalkidan%%lijoch100"
-      ) {
-        const token = jwt.sign(
-          { id: 1, email: email },
-          process.env.JWT_SECRET || "local-dev-secret",
-          { expiresIn: "24h" }
-        );
-
-        return res.json({
-          success: true,
-          message: "Login successful",
-          token: token,
-          admin: {
-            id: 1,
-            name: "Admin",
-            email: email,
-          },
-        });
-      } else {
-        return res.status(401).json({
-          success: false,
-          message: "Invalid credentials",
-        });
-      }
+    // Check if environment variables are set
+    if (!adminEmail || !adminPassword) {
+      console.error("❌ Admin environment variables missing");
+      return res.status(500).json({
+        success: false,
+        message: "Server configuration error",
+      });
     }
 
-    // REAL DATABASE LOGIC
-    const db = getDb();
+    // Check credentials against environment variables
+    if (email === adminEmail && password === adminPassword) {
+      const token = jwt.sign({ id: 1, email: email }, process.env.JWT_SECRET, {
+        expiresIn: "24h",
+      });
 
-    // Get admin from database
-    const admins = await db.query("SELECT * FROM admins WHERE email = $1", [
-      email,
-    ]);
-
-    if (admins.rows.length === 0) {
+      return res.json({
+        success: true,
+        message: "Login successful",
+        token: token,
+        admin: {
+          id: 1,
+          name: "Admin",
+          email: email,
+        },
+      });
+    } else {
       return res.status(401).json({
         success: false,
         message: "Invalid credentials",
       });
     }
-
-    const admin = admins.rows[0];
-    const isPasswordValid = await bcrypt.compare(password, admin.password);
-
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid credentials",
-      });
-    }
-
-    const token = jwt.sign(
-      { adminId: admin.id, email: admin.email },
-      process.env.JWT_SECRET,
-      { expiresIn: "24h" }
-    );
-
-    res.json({
-      success: true,
-      message: "Login successful",
-      token,
-      admin: { id: admin.id, name: admin.name, email: admin.email },
-    });
   } catch (error) {
     console.error("Admin login error:", error);
     res.status(500).json({
