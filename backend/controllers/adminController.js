@@ -11,17 +11,45 @@ const sendConfirmationEmail = async (appointment) => {
       `📧 Attempting to send confirmation email to: ${appointment.email}`
     );
 
+    // 🔍 ADD THESE DEBUG LOGS:
+    console.log(
+      "🔍 DEBUG - DATABASE_URL:",
+      process.env.DATABASE_URL ? "EXISTS" : "MISSING"
+    );
+    console.log(
+      "🔍 DEBUG - EMAIL_USER:",
+      process.env.EMAIL_USER ? "EXISTS" : "MISSING"
+    );
+    console.log(
+      "🔍 DEBUG - EMAIL_PASS:",
+      process.env.EMAIL_PASS ? "EXISTS" : "MISSING"
+    );
+
     // Check if we're in local development mode
     if (!process.env.DATABASE_URL) {
-      console.log("🔧 LOCAL MODE: Email simulation");
+      console.log("🚫 BLOCKED: Local development mode - Email simulation");
       return;
+    } else {
+      console.log("✅ PASSED: Production mode check");
     }
 
     // Check if we have email credentials
     if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      console.log("❌ Email credentials missing");
+      console.log("🚫 BLOCKED: Email credentials missing");
+      console.log(
+        "   - EMAIL_USER:",
+        process.env.EMAIL_USER ? "SET" : "MISSING"
+      );
+      console.log(
+        "   - EMAIL_PASS:",
+        process.env.EMAIL_PASS ? "SET" : "MISSING"
+      );
       return;
+    } else {
+      console.log("✅ PASSED: Email credentials check");
     }
+
+    console.log("🎯 ALL CHECKS PASSED - Preparing email content");
 
     const emailText = `
 Hi ${appointment.name},
@@ -47,10 +75,17 @@ Your Twist Zone Team
       text: emailText,
     };
 
+    console.log("📤 Attempting to send email with transporter...");
+    console.log("   From:", mailOptions.from.address);
+    console.log("   To:", mailOptions.to);
+    console.log("   Subject:", mailOptions.subject);
+
     const result = await transporter.sendMail(mailOptions);
-    console.log(`✅ Confirmation email sent to: ${appointment.email}`);
+    console.log(`✅ SUCCESS: Confirmation email sent to: ${appointment.email}`);
+    console.log("   Message ID:", result.messageId);
   } catch (error) {
-    console.error("❌ Confirmation email failed:", error);
+    console.error("❌ CONFirmation email FAILED:", error.message);
+    console.error("   Full error details:", error);
   }
 };
 
