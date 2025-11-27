@@ -12,13 +12,29 @@ const PORT = process.env.PORT || 5000;
 app.use(helmet());
 app.use(
   cors({
-    origin: [
-      "http://localhost:3000",
-      "https://musical-gaufre-7f3289.netlify.app",
-      "https://twist-hair-backend.onrender.com",
-      "https://twist-zone-frontend-clean-1.onrender.com", // ← ADD THIS!
-      "https://twistzone-frontend.onrender.com", // ← AND THIS!
-    ],
+    origin: function (origin, callback) {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+
+      // Allow ALL Netlify domains automatically
+      if (origin.includes(".netlify.app")) {
+        return callback(null, true);
+      }
+
+      // Allow your specific non-Netlify domains
+      const allowedOrigins = [
+        "http://localhost:3000",
+        "https://twist-hair-backend.onrender.com",
+        "https://twist-zone-frontend-clean-1.onrender.com",
+        "https://twistzone-frontend.onrender.com",
+      ];
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("Not allowed by CORS"));
+    },
     credentials: true,
   })
 );
