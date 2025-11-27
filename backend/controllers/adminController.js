@@ -339,8 +339,9 @@ const updateAppointmentStatus = async (req, res) => {
     ]);
 
     // Send confirmation email if status changed to confirmed
+    // 📧 EMAILS DISABLED - Just log
     if (status === "confirmed" && appointment.status !== "confirmed") {
-      await sendConfirmationEmail(appointment);
+      console.log("📧 WOULD SEND EMAIL TO:", appointment.email);
     }
 
     res.json({
